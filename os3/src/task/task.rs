@@ -8,6 +8,8 @@ pub struct TaskControlBlock {
     pub task_status: TaskStatus,
     pub task_cx: TaskContext,
     // LAB1: Add whatever you need about the Task.
+    pub task_total_time: usize,
+    pub task_prev_suspend_time: usize,
 }
 
 #[derive(Copy, Clone, PartialEq)]

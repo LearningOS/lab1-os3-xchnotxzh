@@ -17,6 +17,8 @@ mod task;
 use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall::TaskInfo;
+use crate::timer::get_time_us;
 use lazy_static::*;
 pub use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -45,6 +47,7 @@ struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
+    syscall_status: [[u32; MAX_SYSCALL_NUM];MAX_APP_NUM],
 }
 
 lazy_static! {
@@ -54,6 +57,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_total_time: 0,
+            task_prev_suspend_time: 0,
         }; MAX_APP_NUM];
         for (i, t) in tasks.iter_mut().enumerate().take(num_app) {
             t.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -65,6 +70,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    syscall_status: [[0; MAX_SYSCALL_NUM];MAX_APP_NUM],
                 })
             },
         }
@@ -80,6 +86,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.task_prev_suspend_time = get_time_us();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -95,6 +102,9 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Ready;
+        let cur_time = get_time_us();
+        inner.tasks[current].task_total_time += cur_time - inner.tasks[current].task_prev_suspend_time;
+        inner.tasks[current].task_prev_suspend_time = cur_time;
     }
 
     /// Change the status of current `Running` task into `Exited`.
@@ -102,6 +112,8 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Exited;
+        inner.tasks[current].task_total_time += get_time_us() - inner.tasks[current].task_prev_suspend_time;
+        inner.tasks[current].task_prev_suspend_time = 0;
     }
 
     /// Find next task to run and return task id.
@@ -122,6 +134,11 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+
+            if inner.tasks[next].task_prev_suspend_time == 0 {
+                inner.tasks[next].task_prev_suspend_time = get_time_us();
+            }
+
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -172,5 +189,23 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
+pub fn update_syscall_status(syscall_id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.syscall_status[current][syscall_id] += 1;
+}
+
+
 // LAB1: Public functions implemented here provide interfaces.
 // You may use TASK_MANAGER member functions to handle requests.
+/// 参数：ti: 待查询任务信息
+/// 返回值：执行成功返回0，错误返回-1
+pub fn get_current_task_info(ti: &mut TaskInfo) -> isize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task_id = inner.current_task;
+    let cur_task = inner.tasks[current_task_id];
+    ti.status = cur_task.task_status;
+    ti.syscall_times = inner.syscall_status[current_task_id];
+    ti.time = (cur_task.task_total_time + get_time_us() - cur_task.task_prev_suspend_time) / 1000;
+    0
+}
