@@ -47,7 +47,6 @@ struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
-    syscall_status: [[u32; MAX_SYSCALL_NUM];MAX_APP_NUM],
 }
 
 lazy_static! {
@@ -57,6 +56,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
             task_total_time: 0,
             task_prev_suspend_time: 0,
         }; MAX_APP_NUM];
@@ -70,7 +70,6 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
-                    syscall_status: [[0; MAX_SYSCALL_NUM];MAX_APP_NUM],
                 })
             },
         }
@@ -154,6 +153,7 @@ impl TaskManager {
     }
 
     // LAB1: Try to implement your function to update or get task info!
+
 }
 
 /// Run the first task in task list.
@@ -189,12 +189,12 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
-pub fn update_syscall_status(syscall_id: usize) {
+pub fn update_syscall_times(syscall_id: usize) {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
-    inner.syscall_status[current][syscall_id] += 1;
+    let current_tcb = &mut inner.tasks[current];
+    current_tcb.syscall_times[syscall_id] += 1;
 }
-
 
 // LAB1: Public functions implemented here provide interfaces.
 // You may use TASK_MANAGER member functions to handle requests.
@@ -202,10 +202,9 @@ pub fn update_syscall_status(syscall_id: usize) {
 /// 返回值：执行成功返回0，错误返回-1
 pub fn get_current_task_info(ti: &mut TaskInfo) -> isize {
     let inner = TASK_MANAGER.inner.exclusive_access();
-    let current_task_id = inner.current_task;
-    let cur_task = inner.tasks[current_task_id];
-    ti.status = cur_task.task_status;
-    ti.syscall_times = inner.syscall_status[current_task_id];
-    ti.time = (cur_task.task_total_time + get_time_us() - cur_task.task_prev_suspend_time) / 1000;
+    let current_tcb = &(inner.tasks[inner.current_task]);
+    ti.status = current_tcb.task_status;
+    ti.syscall_times = current_tcb.syscall_times;
+    ti.time = (current_tcb.task_total_time + get_time_us() - current_tcb.task_prev_suspend_time) / 1000;
     0
 }

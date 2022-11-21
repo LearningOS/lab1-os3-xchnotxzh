@@ -15,7 +15,7 @@
 mod context;
 
 use crate::syscall::syscall;
-use crate::task::{exit_current_and_run_next, suspend_current_and_run_next, update_syscall_status};
+use crate::task::{exit_current_and_run_next, suspend_current_and_run_next, update_syscall_times};
 use crate::timer::set_next_trigger;
 use riscv::register::{
     mtvec::TrapMode,
@@ -50,7 +50,7 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
             cx.sepc += 4;
-            update_syscall_status(cx.x[17]);
+            update_syscall_times(cx.x[17]);
             cx.x[10] = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
         }
         Trap::Exception(Exception::StoreFault) | Trap::Exception(Exception::StorePageFault) => {
